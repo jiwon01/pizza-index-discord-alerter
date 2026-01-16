@@ -48,12 +48,12 @@ class Alert:
     def title(self) -> str:
         """Get a human-readable title for this alert."""
         titles = {
-            AlertType.DOUGHCON_ESCALATION: "DOUGHCON Level Increased!",
-            AlertType.DOUGHCON_DEESCALATION: "DOUGHCON Level Decreased",
-            AlertType.ORDER_SPIKE: "Order Activity Spike Detected!",
-            AlertType.STATUS_CHANGE: "Store Status Changed",
+            AlertType.DOUGHCON_ESCALATION: "DOUGHCON 레벨 상승!",
+            AlertType.DOUGHCON_DEESCALATION: "DOUGHCON 레벨 하락",
+            AlertType.ORDER_SPIKE: "주문 활동 급증 감지!",
+            AlertType.STATUS_CHANGE: "매장 상태 변경",
         }
-        return titles.get(self.alert_type, "Alert")
+        return titles.get(self.alert_type, "알림")
 
 
 class ChangeDetector:
@@ -109,7 +109,7 @@ class ChangeDetector:
                 previous_value=str(previous_level),
                 current_value=str(current_level),
                 doughcon_level=current_level,
-                details=f"Threat level increased from {previous_level} to {current_level}"
+                details=f"위협 수준이 {previous_level}에서 {current_level}로 상승했습니다"
             )
         elif current_level > previous_level:
             # Higher number = lower alert (de-escalation)
@@ -121,7 +121,7 @@ class ChangeDetector:
                 previous_value=str(previous_level),
                 current_value=str(current_level),
                 doughcon_level=current_level,
-                details=f"Threat level decreased from {previous_level} to {current_level}"
+                details=f"위협 수준이 {previous_level}에서 {current_level}로 하락했습니다"
             )
         
         return None
@@ -169,8 +169,8 @@ class ChangeDetector:
                         current_value=f"{store.activity_percent:.1f}%",
                         doughcon_level=current_data.doughcon_level,
                         details=(
-                            f"{store.name} activity increased by "
-                            f"{increase:.1f}% ({prev_activity:.1f}% → {store.activity_percent:.1f}%)"
+                            f"{store.name} 활동량이 "
+                            f"{increase:.1f}% 증가 ({prev_activity:.1f}% → {store.activity_percent:.1f}%)"
                         )
                     ))
         

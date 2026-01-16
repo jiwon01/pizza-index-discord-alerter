@@ -1,17 +1,16 @@
 """
 Pizza Index Scraper Module
 
-Fetches and parses data from the Pizza Index website.
+Fetches and parses data from the Pizza Index website using Playwright
+for JavaScript rendering support.
 """
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-import httpx
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -37,221 +36,202 @@ class PizzaData:
 
 
 class PizzaIndexScraper:
-    """Scrapes pizza index data from the website."""
+    """Scrapes pizza index data from the website using Playwright."""
     
     def __init__(self, url: str = "https://www.pizzint.watch/", timeout: int = 30):
         self.url = url
-        self.timeout = timeout
-        self.client = httpx.Client(
-            timeout=timeout,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/120.0.0.0 Safari/537.36"
-            },
-            follow_redirects=True
-        )
+        self.timeout = timeout * 1000  # Convert to milliseconds for Playwright
+        self._playwright = None
+        self._browser = None
+    
+    def _ensure_browser(self):
+        """Ensure browser is initialized."""
+        if self._playwright is None:
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch(headless=True)
     
     def fetch(self) -> PizzaData:
         """Fetch and parse the current pizza index data."""
         logger.info(f"Fetching data from {self.url}")
         
+        self._ensure_browser()
+        page = None
+        
         try:
-            response = self.client.get(self.url)
-            response.raise_for_status()
-            html = response.text
+            page = self._browser.new_page()
+            page.set_default_timeout(self.timeout)
             
-            # Try to extract __NEXT_DATA__ first (Next.js SSR data)
-            data = self._parse_next_data(html)
-            if data:
-                return data
+            # Navigate to the page
+            page.goto(self.url, wait_until="networkidle")
             
-            # Fallback to HTML parsing
-            return self._parse_html(html)
+            # Wait for content to load - look for DOUGHCON text
+            try:
+                page.wait_for_selector("text=DOUGHCON", timeout=10000)
+            except PlaywrightTimeout:
+                logger.warning("Timeout waiting for DOUGHCON text, continuing anyway")
             
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error fetching pizza data: {e}")
-            raise
+            # Extract DOUGHCON level from rendered page
+            doughcon_level = self._extract_doughcon_level(page)
+            doughcon_label = self._extract_doughcon_label(page)
+            
+            # Extract store data
+            stores = self._extract_stores(page)
+            
+            logger.info(f"Extracted DOUGHCON level: {doughcon_level}, Label: {doughcon_label}")
+            
+            return PizzaData(
+                doughcon_level=doughcon_level,
+                doughcon_label=doughcon_label,
+                stores=stores
+            )
+            
         except Exception as e:
             logger.error(f"Error fetching pizza data: {e}")
             raise
+        finally:
+            if page:
+                page.close()
     
-    def _parse_next_data(self, html: str) -> Optional[PizzaData]:
-        """Extract data from Next.js __NEXT_DATA__ script tag."""
-        soup = BeautifulSoup(html, "html.parser")
-        next_data_script = soup.find("script", id="__NEXT_DATA__")
-        
-        if not next_data_script:
-            logger.debug("No __NEXT_DATA__ found, falling back to HTML parsing")
-            return None
-        
+    def _extract_doughcon_level(self, page) -> int:
+        """Extract DOUGHCON level from the rendered page."""
         try:
-            next_data = json.loads(next_data_script.string)
-            props = next_data.get("props", {}).get("pageProps", {})
+            # Try to find text like "DOUGHCON 4" or "DOUGHCON 3"
+            page_text = page.inner_text("body")
             
-            # Extract DOUGHCON level
-            doughcon_level = self._extract_doughcon_from_props(props)
-            if not doughcon_level:
-                # Try finding it elsewhere in the data
-                doughcon_level = self._find_doughcon_in_data(next_data)
-            
-            # Extract stores
-            stores = self._extract_stores_from_props(props)
-            
-            if doughcon_level:
-                return PizzaData(
-                    doughcon_level=doughcon_level,
-                    stores=stores,
-                    raw_data=props
-                )
-                
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse __NEXT_DATA__: {e}")
-        
-        return None
-    
-    def _extract_doughcon_from_props(self, props: dict) -> Optional[int]:
-        """Extract DOUGHCON level from page props."""
-        # Common key patterns
-        for key in ["doughcon", "defcon", "level", "threatLevel", "alertLevel"]:
-            if key in props:
-                value = props[key]
-                if isinstance(value, int) and 1 <= value <= 5:
-                    return value
-                if isinstance(value, dict) and "level" in value:
-                    return value["level"]
-        return None
-    
-    def _find_doughcon_in_data(self, data: dict) -> Optional[int]:
-        """Recursively search for DOUGHCON level in nested data."""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if key.lower() in ["doughcon", "defcon", "level"]:
-                    if isinstance(value, int) and 1 <= value <= 5:
-                        return value
-                result = self._find_doughcon_in_data(value)
-                if result:
-                    return result
-        elif isinstance(data, list):
-            for item in data:
-                result = self._find_doughcon_in_data(item)
-                if result:
-                    return result
-        return None
-    
-    def _extract_stores_from_props(self, props: dict) -> list[PizzaStore]:
-        """Extract store data from page props."""
-        stores = []
-        
-        # Look for stores/restaurants array
-        for key in ["stores", "restaurants", "pizzaStores", "locations"]:
-            if key in props and isinstance(props[key], list):
-                for store_data in props[key]:
-                    store = self._parse_store(store_data)
-                    if store:
-                        stores.append(store)
-                break
-        
-        return stores
-    
-    def _parse_store(self, data: dict) -> Optional[PizzaStore]:
-        """Parse a single store from data."""
-        if not isinstance(data, dict):
-            return None
-        
-        name = data.get("name") or data.get("title") or data.get("storeName")
-        if not name:
-            return None
-        
-        status = (data.get("status") or data.get("state") or "UNKNOWN").upper()
-        activity = data.get("activity") or data.get("popularity") or data.get("busyPercent")
-        distance = data.get("distance")
-        
-        return PizzaStore(
-            name=name,
-            status=status,
-            activity_percent=float(activity) if activity else None,
-            distance=str(distance) if distance else None
-        )
-    
-    def _parse_html(self, html: str) -> PizzaData:
-        """Fallback HTML parsing when __NEXT_DATA__ is not available."""
-        soup = BeautifulSoup(html, "html.parser")
-        
-        # Find DOUGHCON level from text
-        doughcon_level = self._find_doughcon_in_html(soup)
-        
-        # Find stores from HTML structure
-        stores = self._find_stores_in_html(soup)
-        
-        return PizzaData(
-            doughcon_level=doughcon_level or 5,  # Default to 5 (lowest) if not found
-            stores=stores
-        )
-    
-    def _find_doughcon_in_html(self, soup: BeautifulSoup) -> Optional[int]:
-        """Find DOUGHCON level by parsing HTML text."""
-        # Look for text containing "DOUGHCON" followed by a number
-        text = soup.get_text()
-        
-        patterns = [
-            r"DOUGHCON\s*(\d)",
-            r"DEFCON\s*(\d)",
-            r"Level\s*(\d)",
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            # Pattern to match "DOUGHCON 4" format
+            match = re.search(r'DOUGHCON\s*(\d)', page_text, re.IGNORECASE)
             if match:
                 level = int(match.group(1))
                 if 1 <= level <= 5:
-                    logger.info(f"Found DOUGHCON level {level} in HTML")
+                    logger.info(f"Found DOUGHCON level {level} in page text")
                     return level
-        
-        return None
+            
+            # Try finding it in an element with specific selectors
+            selectors = [
+                '[class*="doughcon"]',
+                '[class*="defcon"]',
+                '[class*="level"]',
+                '[class*="threat"]',
+            ]
+            
+            for selector in selectors:
+                try:
+                    elements = page.query_selector_all(selector)
+                    for el in elements:
+                        text = el.inner_text()
+                        match = re.search(r'(\d)', text)
+                        if match:
+                            level = int(match.group(1))
+                            if 1 <= level <= 5:
+                                logger.info(f"Found DOUGHCON level {level} in element: {selector}")
+                                return level
+                except Exception:
+                    continue
+            
+            logger.warning("Could not find DOUGHCON level, defaulting to 5")
+            return 5
+            
+        except Exception as e:
+            logger.error(f"Error extracting DOUGHCON level: {e}")
+            return 5
     
-    def _find_stores_in_html(self, soup: BeautifulSoup) -> list[PizzaStore]:
-        """Find store cards in HTML structure."""
+    def _extract_doughcon_label(self, page) -> Optional[str]:
+        """Extract DOUGHCON label (e.g., 'DOUBLE TAKE')."""
+        try:
+            page_text = page.inner_text("body")
+            
+            # Known labels from the website
+            labels = [
+                "MAXIMUM READINESS",
+                "NEXT STEP TO MAXIMUM READINESS",
+                "INCREASE IN FORCE READINESS",
+                "INCREASED INTELLIGENCE WATCH",
+                "DOUBLE TAKE",
+                "LOWEST STATE OF READINESS",
+            ]
+            
+            for label in labels:
+                if label.upper() in page_text.upper():
+                    return label
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error extracting DOUGHCON label: {e}")
+            return None
+    
+    def _extract_stores(self, page) -> list[PizzaStore]:
+        """Extract store data from the rendered page."""
         stores = []
         
-        # Look for common pizza chain names
-        pizza_names = [
-            "DOMINO'S", "PAPA JOHN'S", "PIZZA HUT", 
-            "LITTLE CAESARS", "MARCO'S", "JETS"
-        ]
-        
-        # Find elements containing pizza store names
-        for name in pizza_names:
-            elements = soup.find_all(string=re.compile(name, re.IGNORECASE))
-            for el in elements:
-                parent = el.find_parent()
-                if parent:
-                    # Try to find status nearby
+        try:
+            page_text = page.inner_text("body")
+            lines = page_text.split('\n')
+            
+            # Pattern: store name (contains PIZZA or known names) followed by CLOSED/OPEN
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                
+                # Skip lines that are too short or too long
+                if len(line) < 5 or len(line) > 30:
+                    i += 1
+                    continue
+                
+                # Check if this line looks like a store name
+                is_store = False
+                if 'PIZZA' in line.upper():
+                    # Must be a clean store name - exclude sentences and historical references
+                    exclude_patterns = [
+                        'INDEX', 'HISTORY', 'INTELLIGENCE', 'THEORY', 'PENTAGON',
+                        'MAGAZINE', 'TIME', 'CRISIS', 'GULF', 'IRAN', 'LAUNCHES',
+                        'DELIVERED', 'CIA', 'DOCUMENTED', 'RUNNER', '→', '—',
+                        'REAL', 'ACCURATE', 'READ', 'DASHBOARD', 'CELEBRATED',
+                        'PIZZAS', 'VIRAL'
+                    ]
+                    if not any(word in line.upper() for word in exclude_patterns):
+                        is_store = True
+                
+                if is_store:
+                    store_name = line.strip()
                     status = "UNKNOWN"
-                    card = parent
-                    for _ in range(5):  # Go up to 5 levels
-                        card = card.parent if card else None
-                        if card:
-                            card_text = card.get_text().upper()
-                            if "CLOSED" in card_text:
+                    
+                    # Check next few lines for status
+                    for j in range(1, 4):
+                        if i + j < len(lines):
+                            next_line = lines[i + j].strip().upper()
+                            if "CLOSED" in next_line:
                                 status = "CLOSED"
                                 break
-                            elif "OPEN" in card_text:
+                            elif "OPEN" in next_line:
                                 status = "OPEN"
                                 break
-                            elif "BUSY" in card_text:
+                            elif "BUSY" in next_line:
                                 status = "BUSY"
                                 break
                     
                     # Avoid duplicates
-                    if not any(s.name.upper() == name.upper() for s in stores):
-                        stores.append(PizzaStore(name=name, status=status))
+                    if not any(s.name.upper() == store_name.upper() for s in stores):
+                        stores.append(PizzaStore(name=store_name, status=status))
+                        logger.debug(f"Found store: {store_name} - {status}")
+                
+                i += 1
+            
+            logger.info(f"Extracted {len(stores)} stores")
+            
+        except Exception as e:
+            logger.error(f"Error extracting stores: {e}")
         
         return stores
     
     def close(self):
-        """Close the HTTP client."""
-        self.client.close()
+        """Close the browser and Playwright."""
+        if self._browser:
+            self._browser.close()
+            self._browser = None
+        if self._playwright:
+            self._playwright.stop()
+            self._playwright = None
     
     def __enter__(self):
         return self
@@ -271,6 +251,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     data = fetch_pizza_data()
     print(f"DOUGHCON Level: {data.doughcon_level}")
+    print(f"DOUGHCON Label: {data.doughcon_label}")
     print(f"Stores: {len(data.stores)}")
     for store in data.stores:
         print(f"  - {store.name}: {store.status}")

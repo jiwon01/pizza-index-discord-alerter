@@ -105,7 +105,7 @@ class DiscordNotifier:
         # Add change field
         if alert.previous_value and alert.current_value:
             fields.append({
-                "name": "📊 Change",
+                "name": "📊 변경 내용",
                 "value": f"`{alert.previous_value}` → `{alert.current_value}`",
                 "inline": True
             })
@@ -113,7 +113,7 @@ class DiscordNotifier:
         # Add store name if applicable
         if alert.store_name:
             fields.append({
-                "name": "🍕 Store",
+                "name": "🍕 매장",
                 "value": alert.store_name,
                 "inline": True
             })
@@ -121,10 +121,10 @@ class DiscordNotifier:
         # Add current DOUGHCON level
         doughcon_desc = self.descriptions.get(
             doughcon_level, 
-            f"Level {doughcon_level}"
+            f"레벨 {doughcon_level}"
         )
         fields.append({
-            "name": "🎯 Current DOUGHCON",
+            "name": "🎯 현재 DOUGHCON",
             "value": f"**{doughcon_level}** - {doughcon_desc}",
             "inline": False
         })
@@ -147,7 +147,7 @@ class DiscordNotifier:
         """Send a startup status notification."""
         doughcon_level = data.doughcon_level
         color = self.colors.get(doughcon_level, 0x808080)
-        doughcon_desc = self.descriptions.get(doughcon_level, f"Level {doughcon_level}")
+        doughcon_desc = self.descriptions.get(doughcon_level, f"레벨 {doughcon_level}")
         
         # Build store list
         stores_text = ""
@@ -160,21 +160,21 @@ class DiscordNotifier:
             stores_text += f"{status_emoji} **{store.name}**: {store.status}\n"
         
         if len(data.stores) > 5:
-            stores_text += f"_...and {len(data.stores) - 5} more stores_"
+            stores_text += f"_...외 {len(data.stores) - 5}개 매장_"
         
         embed = {
-            "title": "🍕 Pizza Index Monitor Started",
-            "description": "Now monitoring for pizza-related geopolitical indicators.",
+            "title": "🍕 Pizza Index Monitor 시작됨",
+            "description": "피자 관련 지정학적 지표 모니터링을 시작합니다.",
             "color": color,
             "fields": [
                 {
-                    "name": "🎯 Current DOUGHCON Level",
+                    "name": "🎯 현재 DOUGHCON 레벨",
                     "value": f"**{doughcon_level}** - {doughcon_desc}",
                     "inline": False
                 },
                 {
-                    "name": "🏪 Active Stores",
-                    "value": stores_text or "No stores detected",
+                    "name": "🏪 활성 매장",
+                    "value": stores_text or "감지된 매장 없음",
                     "inline": False
                 }
             ],
@@ -196,8 +196,8 @@ class DiscordNotifier:
     def send_test_alert(self) -> bool:
         """Send a test notification to verify webhook is working."""
         embed = {
-            "title": "🔔 Test Notification",
-            "description": "Pizza Index Monitor webhook is configured correctly!",
+            "title": "🔔 테스트 알림",
+            "description": "Pizza Index Monitor 웹훅이 정상적으로 설정되었습니다!",
             "color": 0x00FF00,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "footer": {

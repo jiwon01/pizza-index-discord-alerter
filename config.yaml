@@ -18,13 +18,13 @@ doughcon_colors:
   4: 0x0099FF  # Blue - Guarded
   5: 0x00FF00  # Green - Low
 
-# DOUGHCON level descriptions
+# DOUGHCON level descriptions (한국어)
 doughcon_descriptions:
-  1: "MAXIMUM ALERT - Critical situation"
-  2: "HIGH ALERT - Significant activity"
-  3: "ELEVATED - Increased vigilance"
-  4: "GUARDED - General awareness"
-  5: "LOW - Normal operations"
+  1: "최대 준비태세"
+  2: "최대 준비태세 직전 단계"
+  3: "전력 증강 준비태세"
+  4: "강화된 정보 감시"
+  5: "최소 준비태세"
 
 # State persistence
 state_file: "state.json"
