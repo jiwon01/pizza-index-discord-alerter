@@ -7,18 +7,21 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers and system dependencies
-RUN playwright install --with-deps chromium
-
-# Copy application code
-COPY config.yaml .
-COPY main.py .
-COPY src/ ./src/
+# Install Playwright system dependencies (requires root)
+RUN playwright install-deps chromium
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser && \
     chown -R appuser:appuser /app
+
+# Copy application code
+COPY --chown=appuser:appuser config.yaml .
+COPY --chown=appuser:appuser main.py .
+COPY --chown=appuser:appuser src/ ./src/
+
+# Switch to appuser and install browser binaries
 USER appuser
+RUN playwright install chromium
 
 # Default command
 CMD ["python", "main.py"]
