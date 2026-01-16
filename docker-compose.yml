@@ -1,0 +1,21 @@
+services:
+  pizza-alerter:
+    build: .
+    container_name: pizza-index-alerter
+    restart: unless-stopped
+    environment:
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - POLLING_INTERVAL=${POLLING_INTERVAL:-300}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      # Persist state file across container restarts
+      - pizza-data:/app/data
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import httpx; httpx.get('https://www.pizzint.watch/', timeout=10)" ]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  pizza-data:

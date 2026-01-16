@@ -1,0 +1,34 @@
+# Pizza Index Monitor Configuration
+
+# Monitoring settings
+polling_interval_seconds: 300  # 5 minutes
+request_timeout_seconds: 30
+
+# Alert thresholds
+order_spike_threshold_percent: 30  # Alert when activity increases by this %
+
+# Target URL
+target_url: "https://www.pizzint.watch/"
+
+# DOUGHCON color mapping (Discord embed colors in hex)
+doughcon_colors:
+  1: 0xFF0000  # Red - Maximum Alert
+  2: 0xFF6600  # Orange - High Alert
+  3: 0xFFCC00  # Yellow - Elevated
+  4: 0x0099FF  # Blue - Guarded
+  5: 0x00FF00  # Green - Low
+
+# DOUGHCON level descriptions
+doughcon_descriptions:
+  1: "MAXIMUM ALERT - Critical situation"
+  2: "HIGH ALERT - Significant activity"
+  3: "ELEVATED - Increased vigilance"
+  4: "GUARDED - General awareness"
+  5: "LOW - Normal operations"
+
+# State persistence
+state_file: "state.json"
+
+# Logging
+log_level: "INFO"
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
