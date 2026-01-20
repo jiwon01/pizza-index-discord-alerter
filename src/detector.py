@@ -19,7 +19,8 @@ class AlertType(Enum):
     DOUGHCON_ESCALATION = "doughcon_escalation"
     DOUGHCON_DEESCALATION = "doughcon_deescalation"
     ORDER_SPIKE = "order_spike"
-    STATUS_CHANGE = "status_change"
+    STORE_BUSY = "store_busy"  # Store became busy or busy released
+    NEHI_CHANGE = "nehi_change"  # Nothing Ever Happens Index changed
 
 
 @dataclass
@@ -39,7 +40,8 @@ class Alert:
             AlertType.DOUGHCON_ESCALATION: "🚨",
             AlertType.DOUGHCON_DEESCALATION: "✅",
             AlertType.ORDER_SPIKE: "📈",
-            AlertType.STATUS_CHANGE: "🔄",
+            AlertType.STORE_BUSY: "🔥",
+            AlertType.NEHI_CHANGE: "🌍",
         }
         return emojis.get(self.alert_type, "⚠️")
 
@@ -50,7 +52,8 @@ class Alert:
             AlertType.DOUGHCON_ESCALATION: "DOUGHCON 레벨 상승!",
             AlertType.DOUGHCON_DEESCALATION: "DOUGHCON 레벨 하락",
             AlertType.ORDER_SPIKE: "주문 활동 급증 감지!",
-            AlertType.STATUS_CHANGE: "매장 상태 변경",
+            AlertType.STORE_BUSY: "매장 혼잡 상태 변경",
+            AlertType.NEHI_CHANGE: "Nothing Ever Happens Index 변경",
         }
         return titles.get(self.alert_type, "알림")
 
@@ -83,6 +86,11 @@ class ChangeDetector:
         doughcon_alert = self._check_doughcon_change(current_data)
         if doughcon_alert:
             alerts.append(doughcon_alert)
+
+        # Check NEHI changes
+        nehi_alert = self._check_nehi_change(current_data)
+        if nehi_alert:
+            alerts.append(nehi_alert)
 
         # Check store changes
         store_alerts = self._check_store_changes(current_data)
@@ -125,8 +133,30 @@ class ChangeDetector:
 
         return None
 
+    def _check_nehi_change(self, current_data: PizzaData) -> Alert | None:
+        """Check for Nothing Ever Happens Index changes."""
+        previous_nehi = self.state_manager.get_previous_nehi_status()
+        current_nehi = current_data.nehi_status
+
+        if previous_nehi is None or current_nehi is None:
+            return None
+
+        if current_nehi.upper() != previous_nehi.upper():
+            logger.info(
+                f"NEHI change: {previous_nehi} → {current_nehi}"
+            )
+            return Alert(
+                alert_type=AlertType.NEHI_CHANGE,
+                previous_value=previous_nehi,
+                current_value=current_nehi,
+                doughcon_level=current_data.doughcon_level,
+                details=f"Nothing Ever Happens Index가 '{previous_nehi}'에서 '{current_nehi}'로 변경되었습니다"
+            )
+
+        return None
+
     def _check_store_changes(self, current_data: PizzaData) -> list[Alert]:
-        """Check for store status and activity changes."""
+        """Check for store BUSY status changes only."""
         alerts = []
         previous_stores = self.state_manager.get_previous_stores()
 
@@ -136,23 +166,36 @@ class ChangeDetector:
                 continue
 
             prev_store = previous_stores[store.name]
-
-            # Check status change
             prev_status = prev_store.get("status", "UNKNOWN")
-            if store.status != prev_status:
-                logger.info(
-                    f"Store {store.name} status: {prev_status} → {store.status}"
-                )
-                alerts.append(Alert(
-                    alert_type=AlertType.STATUS_CHANGE,
-                    store_name=store.name,
-                    previous_value=prev_status,
-                    current_value=store.status,
-                    doughcon_level=current_data.doughcon_level,
-                    details=f"{store.name}: {prev_status} → {store.status}"
-                ))
+            current_status = store.status
 
-            # Check activity spike
+            # Only alert on BUSY-related changes:
+            # 1. Any state -> BUSY (store became busy)
+            # 2. BUSY -> Any other state (busy released)
+            if prev_status != current_status:
+                is_busy_change = (
+                    current_status == "BUSY" or prev_status == "BUSY"
+                )
+                
+                if is_busy_change:
+                    if current_status == "BUSY":
+                        detail_msg = f"{store.name}이(가) 혼잡 상태가 되었습니다"
+                    else:
+                        detail_msg = f"{store.name}의 혼잡 상태가 해제되었습니다 ({prev_status} → {current_status})"
+                    
+                    logger.info(
+                        f"Store {store.name} BUSY change: {prev_status} → {current_status}"
+                    )
+                    alerts.append(Alert(
+                        alert_type=AlertType.STORE_BUSY,
+                        store_name=store.name,
+                        previous_value=prev_status,
+                        current_value=current_status,
+                        doughcon_level=current_data.doughcon_level,
+                        details=detail_msg
+                    ))
+
+            # Check activity spike (unchanged)
             prev_activity = prev_store.get("activity_percent")
             if store.activity_percent is not None and prev_activity is not None:
                 increase = store.activity_percent - prev_activity

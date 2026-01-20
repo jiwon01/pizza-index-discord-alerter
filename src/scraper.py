@@ -31,6 +31,7 @@ class PizzaData:
     doughcon_label: str | None = None  # e.g., "DOUBLE TAKE"
     doughcon_description: str | None = None
     stores: list[PizzaStore] = field(default_factory=list)
+    nehi_status: str | None = None  # Nothing Ever Happens Index status
     timestamp: str | None = None
     raw_data: dict | None = None  # For debugging
 
@@ -77,12 +78,16 @@ class PizzaIndexScraper:
             # Extract store data
             stores = self._extract_stores(page)
 
-            logger.info(f"Extracted DOUGHCON level: {doughcon_level}, Label: {doughcon_label}")
+            # Extract Nothing Ever Happens Index status
+            nehi_status = self._extract_nehi_status(page)
+
+            logger.info(f"Extracted DOUGHCON level: {doughcon_level}, Label: {doughcon_label}, NEHI: {nehi_status}")
 
             return PizzaData(
                 doughcon_level=doughcon_level,
                 doughcon_label=doughcon_label,
-                stores=stores
+                stores=stores,
+                nehi_status=nehi_status
             )
 
         except Exception as e:
@@ -158,6 +163,31 @@ class PizzaIndexScraper:
 
         except Exception as e:
             logger.debug(f"Error extracting DOUGHCON label: {e}")
+            return None
+
+    def _extract_nehi_status(self, page) -> str | None:
+        """Extract Nothing Ever Happens Index status from the rendered page."""
+        try:
+            page_text = page.inner_text("body")
+
+            # Known NEHI statuses
+            nehi_statuses = [
+                "IT HAPPENED",
+                "SOMETHING IS HAPPENING",
+                "SOMETHING MIGHT HAPPEN",
+                "NOTHING EVER HAPPENS",
+            ]
+
+            # Look for "Status: <status>" pattern
+            for status in nehi_statuses:
+                if status.upper() in page_text.upper():
+                    logger.info(f"Found NEHI status: {status}")
+                    return status
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error extracting NEHI status: {e}")
             return None
 
     def _extract_stores(self, page) -> list[PizzaStore]:

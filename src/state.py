@@ -66,12 +66,19 @@ class StateManager:
         stores = self._previous_state.get("stores", [])
         return {s["name"]: s for s in stores}
 
+    def get_previous_nehi_status(self) -> str | None:
+        """Get previous Nothing Ever Happens Index status."""
+        if self._previous_state:
+            return self._previous_state.get("nehi_status")
+        return None
+
     def _data_to_dict(self, data: PizzaData) -> dict:
         """Convert PizzaData to a serializable dict."""
         return {
             "doughcon_level": data.doughcon_level,
             "doughcon_label": data.doughcon_label,
             "doughcon_description": data.doughcon_description,
+            "nehi_status": data.nehi_status,
             "stores": [
                 {
                     "name": s.name,
