@@ -71,17 +71,24 @@ class PizzaIndexScraper:
             except PlaywrightTimeout:
                 logger.warning("Timeout waiting for DOUGHCON text, continuing anyway")
 
+            # Additional wait for dynamic content
+            page.wait_for_timeout(2000)
+
             # Extract DOUGHCON level from rendered page
             doughcon_level = self._extract_doughcon_level(page)
             doughcon_label = self._extract_doughcon_label(page)
 
-            # Extract store data
-            stores = self._extract_stores(page)
+            # Extract store data using DOM
+            stores = self._extract_stores_from_dom(page)
 
             # Extract Nothing Ever Happens Index status
             nehi_status = self._extract_nehi_status(page)
 
-            logger.info(f"Extracted DOUGHCON level: {doughcon_level}, Label: {doughcon_label}, NEHI: {nehi_status}")
+            logger.info(
+                f"Extracted DOUGHCON level: {doughcon_level}, "
+                f"Label: {doughcon_label}, NEHI: {nehi_status}, "
+                f"Stores: {len(stores)}"
+            )
 
             return PizzaData(
                 doughcon_level=doughcon_level,
@@ -98,37 +105,31 @@ class PizzaIndexScraper:
                 page.close()
 
     def _extract_doughcon_level(self, page) -> int:
-        """Extract DOUGHCON level from the rendered page."""
+        """Extract DOUGHCON level from the rendered page using DOM and text parsing."""
         try:
-            # Try to find text like "DOUGHCON 4" or "DOUGHCON 3"
+            # Method 1: Look for "DOUGHCON X" pattern in page text
             page_text = page.inner_text("body")
-
-            # Pattern to match "DOUGHCON 4" format
+            
+            # Pattern to match "DOUGHCON 4" or "DOUGHCON4" format
             match = re.search(r'DOUGHCON\s*(\d)', page_text, re.IGNORECASE)
             if match:
                 level = int(match.group(1))
                 if 1 <= level <= 5:
-                    logger.info(f"Found DOUGHCON level {level} in page text")
+                    logger.info(f"Found DOUGHCON level {level} via text pattern")
                     return level
 
-            # Try finding it in an element with specific selectors
-            selectors = [
-                '[class*="doughcon"]',
-                '[class*="defcon"]',
-                '[class*="level"]',
-                '[class*="threat"]',
-            ]
-
-            for selector in selectors:
+            # Method 2: Try finding elements with specific text content
+            # Look for elements that contain "DOUGHCON" followed by a number
+            doughcon_elements = page.query_selector_all("h1, h2, h3, div, span, p")
+            for el in doughcon_elements:
                 try:
-                    elements = page.query_selector_all(selector)
-                    for el in elements:
-                        text = el.inner_text()
-                        match = re.search(r'(\d)', text)
+                    text = el.inner_text()
+                    if "DOUGHCON" in text.upper():
+                        match = re.search(r'DOUGHCON\s*(\d)', text, re.IGNORECASE)
                         if match:
                             level = int(match.group(1))
                             if 1 <= level <= 5:
-                                logger.info(f"Found DOUGHCON level {level} in element: {selector}")
+                                logger.info(f"Found DOUGHCON level {level} via DOM element")
                                 return level
                 except Exception:
                     continue
@@ -145,18 +146,19 @@ class PizzaIndexScraper:
         try:
             page_text = page.inner_text("body")
 
-            # Known labels from the website
+            # Known labels from the website (ordered by DOUGHCON level, 1-5)
             labels = [
-                "MAXIMUM READINESS",
-                "NEXT STEP TO MAXIMUM READINESS",
-                "INCREASE IN FORCE READINESS",
-                "INCREASED INTELLIGENCE WATCH",
-                "DOUBLE TAKE",
-                "LOWEST STATE OF READINESS",
+                "MAXIMUM READINESS",              # Level 1
+                "NEXT STEP TO MAXIMUM READINESS", # Level 2
+                "INCREASE IN FORCE READINESS",    # Level 3
+                "INCREASED INTELLIGENCE WATCH",   # Level 4 (also known as DOUBLE TAKE)
+                "DOUBLE TAKE",                    # Level 4 alternate
+                "LOWEST STATE OF READINESS",      # Level 5
             ]
 
             for label in labels:
                 if label.upper() in page_text.upper():
+                    logger.debug(f"Found DOUGHCON label: {label}")
                     return label
 
             return None
@@ -168,8 +170,9 @@ class PizzaIndexScraper:
     def _extract_nehi_status(self, page) -> str | None:
         """Extract Nothing Ever Happens Index status from the rendered page."""
         try:
+            # Method 1: Look for "Status: <status>" pattern
             page_text = page.inner_text("body")
-
+            
             # Known NEHI statuses
             nehi_statuses = [
                 "IT HAPPENED",
@@ -178,7 +181,16 @@ class PizzaIndexScraper:
                 "NOTHING EVER HAPPENS",
             ]
 
-            # Look for "Status: <status>" pattern
+            # Try to find "Status: X" pattern first
+            status_match = re.search(r'Status:\s*([A-Za-z\s]+?)(?:\n|$)', page_text)
+            if status_match:
+                found_status = status_match.group(1).strip()
+                for status in nehi_statuses:
+                    if status.upper() in found_status.upper():
+                        logger.info(f"Found NEHI status via pattern: {status}")
+                        return status
+
+            # Fallback: search for known statuses in page text
             for status in nehi_statuses:
                 if status.upper() in page_text.upper():
                     logger.info(f"Found NEHI status: {status}")
@@ -190,67 +202,164 @@ class PizzaIndexScraper:
             logger.debug(f"Error extracting NEHI status: {e}")
             return None
 
-    def _extract_stores(self, page) -> list[PizzaStore]:
-        """Extract store data from the rendered page."""
+    def _extract_stores_from_dom(self, page) -> list[PizzaStore]:
+        """Extract store data from DOM structure."""
+        stores = []
+
+        try:
+            # Find all store name elements (h3 tags with pizza store names)
+            # Based on observed HTML: <h3 class="font-mono font-bold text-lg tracking-wider text-white">STORE NAME</h3>
+            store_name_elements = page.query_selector_all(
+                "h3.font-mono.font-bold"
+            )
+            
+            logger.debug(f"Found {len(store_name_elements)} potential store name elements")
+
+            for name_el in store_name_elements:
+                try:
+                    store_name = name_el.inner_text().strip()
+                    
+                    # Skip if not a pizza store (filter out non-store headers)
+                    if not self._is_pizza_store_name(store_name):
+                        continue
+
+                    # Find the parent container to get status and distance
+                    # Navigate up to find the store card container
+                    parent = name_el.evaluate_handle(
+                        "el => el.closest('div.bg-gray-900') || el.parentElement.parentElement.parentElement"
+                    )
+                    
+                    status = "UNKNOWN"
+                    distance = None
+                    
+                    if parent:
+                        parent_text = parent.inner_text()
+                        
+                        # Extract status (OPEN, CLOSED, BUSY)
+                        if "BUSY" in parent_text.upper():
+                            status = "BUSY"
+                        elif "OPEN" in parent_text.upper():
+                            status = "OPEN"
+                        elif "CLOSED" in parent_text.upper():
+                            status = "CLOSED"
+                        
+                        # Extract distance (e.g., "1.4 mi")
+                        distance_match = re.search(r'(\d+\.?\d*)\s*mi', parent_text)
+                        if distance_match:
+                            distance = f"{distance_match.group(1)} mi"
+
+                    # Avoid duplicates
+                    if not any(s.name.upper() == store_name.upper() for s in stores):
+                        stores.append(PizzaStore(
+                            name=store_name,
+                            status=status,
+                            distance=distance
+                        ))
+                        logger.debug(f"Found store: {store_name} - {status} - {distance}")
+
+                except Exception as e:
+                    logger.debug(f"Error processing store element: {e}")
+                    continue
+
+            # Fallback: if no stores found via DOM, try text-based extraction
+            if not stores:
+                logger.warning("No stores found via DOM, falling back to text extraction")
+                stores = self._extract_stores_from_text(page)
+
+            logger.info(f"Extracted {len(stores)} stores")
+
+        except Exception as e:
+            logger.error(f"Error extracting stores from DOM: {e}")
+
+        return stores
+
+    def _is_pizza_store_name(self, name: str) -> bool:
+        """Check if the given name is likely a pizza store name."""
+        name_upper = name.upper()
+        
+        # Known pizza store names
+        known_stores = [
+            "DOMINO'S PIZZA",
+            "DOMINOS PIZZA",
+            "EXTREME PIZZA",
+            "DISTRICT PIZZA PALACE",
+            "WE, THE PIZZA",
+            "PIZZATO PIZZA",
+            "PAPA JOHNS PIZZA",
+            "PAPA JOHN'S PIZZA",
+        ]
+        
+        # Check if it matches known stores
+        for known in known_stores:
+            if known in name_upper or name_upper in known:
+                return True
+        
+        # Check if it contains "PIZZA" and looks like a store name
+        if "PIZZA" in name_upper:
+            # Exclude non-store text
+            exclude_patterns = [
+                'INDEX', 'HISTORY', 'INTELLIGENCE', 'THEORY', 'PENTAGON',
+                'MAGAZINE', 'TIME', 'CRISIS', 'GULF', 'IRAN', 'LAUNCHES',
+                'DELIVERED', 'CIA', 'DOCUMENTED', 'RUNNER', '→', '—',
+                'REAL', 'ACCURATE', 'READ', 'DASHBOARD', 'CELEBRATED',
+                'PIZZAS', 'VIRAL', 'FREQUENCIES', 'PETE-ZA', 'PIZZINT'
+            ]
+            if not any(word in name_upper for word in exclude_patterns):
+                return True
+        
+        return False
+
+    def _extract_stores_from_text(self, page) -> list[PizzaStore]:
+        """Fallback: Extract store data from page text."""
         stores = []
 
         try:
             page_text = page.inner_text("body")
             lines = page_text.split('\n')
 
-            # Pattern: store name (contains PIZZA or known names) followed by CLOSED/OPEN
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
+            # Known store names to look for
+            known_stores = [
+                "DOMINO'S PIZZA",
+                "EXTREME PIZZA",
+                "DISTRICT PIZZA PALACE",
+                "WE, THE PIZZA",
+                "PIZZATO PIZZA",
+                "PAPA JOHNS PIZZA",
+            ]
 
-                # Skip lines that are too short or too long
-                if len(line) < 5 or len(line) > 30:
-                    i += 1
-                    continue
-
-                # Check if this line looks like a store name
-                is_store = False
-                if 'PIZZA' in line.upper():
-                    # Must be a clean store name - exclude sentences and historical references
-                    exclude_patterns = [
-                        'INDEX', 'HISTORY', 'INTELLIGENCE', 'THEORY', 'PENTAGON',
-                        'MAGAZINE', 'TIME', 'CRISIS', 'GULF', 'IRAN', 'LAUNCHES',
-                        'DELIVERED', 'CIA', 'DOCUMENTED', 'RUNNER', '→', '—',
-                        'REAL', 'ACCURATE', 'READ', 'DASHBOARD', 'CELEBRATED',
-                        'PIZZAS', 'VIRAL'
-                    ]
-                    if not any(word in line.upper() for word in exclude_patterns):
-                        is_store = True
-
-                if is_store:
-                    store_name = line.strip()
-                    status = "UNKNOWN"
-
-                    # Check next few lines for status
-                    for j in range(1, 4):
-                        if i + j < len(lines):
-                            next_line = lines[i + j].strip().upper()
-                            if "CLOSED" in next_line:
-                                status = "CLOSED"
-                                break
-                            elif "OPEN" in next_line:
-                                status = "OPEN"
-                                break
-                            elif "BUSY" in next_line:
+            for store_name in known_stores:
+                # Find the store name in the text
+                for i, line in enumerate(lines):
+                    if store_name.upper() in line.upper():
+                        status = "UNKNOWN"
+                        distance = None
+                        
+                        # Look at surrounding lines for status and distance
+                        for j in range(max(0, i-2), min(len(lines), i+5)):
+                            check_line = lines[j].upper()
+                            if "BUSY" in check_line:
                                 status = "BUSY"
-                                break
+                            elif "OPEN" in check_line and status == "UNKNOWN":
+                                status = "OPEN"
+                            elif "CLOSED" in check_line and status == "UNKNOWN":
+                                status = "CLOSED"
+                            
+                            # Look for distance
+                            dist_match = re.search(r'(\d+\.?\d*)\s*mi', lines[j])
+                            if dist_match:
+                                distance = f"{dist_match.group(1)} mi"
 
-                    # Avoid duplicates
-                    if not any(s.name.upper() == store_name.upper() for s in stores):
-                        stores.append(PizzaStore(name=store_name, status=status))
-                        logger.debug(f"Found store: {store_name} - {status}")
-
-                i += 1
-
-            logger.info(f"Extracted {len(stores)} stores")
+                        # Avoid duplicates
+                        if not any(s.name.upper() == store_name.upper() for s in stores):
+                            stores.append(PizzaStore(
+                                name=store_name,
+                                status=status,
+                                distance=distance
+                            ))
+                        break
 
         except Exception as e:
-            logger.error(f"Error extracting stores: {e}")
+            logger.error(f"Error in text-based store extraction: {e}")
 
         return stores
 
@@ -282,6 +391,7 @@ if __name__ == "__main__":
     data = fetch_pizza_data()
     print(f"DOUGHCON Level: {data.doughcon_level}")
     print(f"DOUGHCON Label: {data.doughcon_label}")
+    print(f"NEHI Status: {data.nehi_status}")
     print(f"Stores: {len(data.stores)}")
     for store in data.stores:
-        print(f"  - {store.name}: {store.status}")
+        print(f"  - {store.name}: {store.status} ({store.distance})")

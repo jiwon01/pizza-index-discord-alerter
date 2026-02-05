@@ -82,6 +82,18 @@ class ChangeDetector:
             logger.info("First run - no previous state to compare")
             return alerts
 
+        logger.debug(
+            f"Comparing states - Current: DOUGHCON={current_data.doughcon_level}, "
+            f"NEHI={current_data.nehi_status}, Stores={len(current_data.stores)}"
+        )
+        previous_state = self.state_manager.get_previous_state()
+        if previous_state:
+            logger.debug(
+                f"Previous state: DOUGHCON={previous_state.get('doughcon_level')}, "
+                f"NEHI={previous_state.get('nehi_status')}, "
+                f"Stores={len(previous_state.get('stores', []))}"
+            )
+
         # Check DOUGHCON level changes
         doughcon_alert = self._check_doughcon_change(current_data)
         if doughcon_alert:
@@ -103,7 +115,16 @@ class ChangeDetector:
         previous_level = self.state_manager.get_previous_doughcon()
         current_level = current_data.doughcon_level
 
+        logger.debug(
+            f"DOUGHCON comparison: previous={previous_level}, current={current_level}"
+        )
+
         if previous_level is None:
+            logger.debug("No previous DOUGHCON level found, skipping comparison")
+            return None
+
+        if current_level == previous_level:
+            logger.debug("DOUGHCON level unchanged")
             return None
 
         if current_level < previous_level:
@@ -138,22 +159,30 @@ class ChangeDetector:
         previous_nehi = self.state_manager.get_previous_nehi_status()
         current_nehi = current_data.nehi_status
 
+        logger.debug(
+            f"NEHI comparison: previous={previous_nehi!r}, current={current_nehi!r}"
+        )
+
         if previous_nehi is None or current_nehi is None:
+            logger.debug("NEHI status missing, skipping comparison")
             return None
 
-        if current_nehi.upper() != previous_nehi.upper():
-            logger.info(
-                f"NEHI change: {previous_nehi} → {current_nehi}"
-            )
-            return Alert(
-                alert_type=AlertType.NEHI_CHANGE,
-                previous_value=previous_nehi,
-                current_value=current_nehi,
-                doughcon_level=current_data.doughcon_level,
-                details=f"Nothing Ever Happens Index가 '{previous_nehi}'에서 '{current_nehi}'로 변경되었습니다"
-            )
+        # Normalize for comparison (strip whitespace and compare case-insensitively)
+        prev_normalized = previous_nehi.strip().upper()
+        curr_normalized = current_nehi.strip().upper()
 
-        return None
+        if curr_normalized == prev_normalized:
+            logger.debug("NEHI status unchanged")
+            return None
+
+        logger.info(f"NEHI change: {previous_nehi} → {current_nehi}")
+        return Alert(
+            alert_type=AlertType.NEHI_CHANGE,
+            previous_value=previous_nehi,
+            current_value=current_nehi,
+            doughcon_level=current_data.doughcon_level,
+            details=f"Nothing Ever Happens Index가 '{previous_nehi}'에서 '{current_nehi}'로 변경되었습니다"
+        )
 
     def _check_store_changes(self, current_data: PizzaData) -> list[Alert]:
         """Check for store BUSY status changes only."""
