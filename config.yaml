@@ -1,7 +1,7 @@
 # Pizza Index Monitor Configuration
 
 # Monitoring settings
-polling_interval_seconds: 300  # 5 minutes
+polling_interval_seconds: 60  # 1 minute
 request_timeout_seconds: 30
 
 # Alert thresholds
@@ -27,7 +27,7 @@ doughcon_descriptions:
   5: "최소 준비태세"
 
 # State persistence
-state_file: "state.json"
+state_file: "data/state.json"
 
 # Logging
 log_level: "INFO"

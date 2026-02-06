@@ -12,6 +12,7 @@ RUN playwright install-deps chromium
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser && \
+    mkdir -p /app/data && \
     chown -R appuser:appuser /app
 
 # Copy application code
