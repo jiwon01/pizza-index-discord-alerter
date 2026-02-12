@@ -185,7 +185,7 @@ class ChangeDetector:
         )
 
     def _check_store_changes(self, current_data: PizzaData) -> list[Alert]:
-        """Check for store BUSY status changes only."""
+        """Check for store activity-based changes."""
         alerts = []
         previous_stores = self.state_manager.get_previous_stores()
 
@@ -195,34 +195,6 @@ class ChangeDetector:
                 continue
 
             prev_store = previous_stores[store.name]
-            prev_status = prev_store.get("status", "UNKNOWN")
-            current_status = store.status
-
-            # Only alert on BUSY-related changes:
-            # 1. Any state -> BUSY (store became busy)
-            # 2. BUSY -> Any other state (busy released)
-            if prev_status != current_status:
-                is_busy_change = (
-                    current_status == "BUSY" or prev_status == "BUSY"
-                )
-                
-                if is_busy_change:
-                    if current_status == "BUSY":
-                        detail_msg = f"{store.name}이(가) 혼잡 상태가 되었습니다"
-                    else:
-                        detail_msg = f"{store.name}의 혼잡 상태가 해제되었습니다 ({prev_status} → {current_status})"
-                    
-                    logger.info(
-                        f"Store {store.name} BUSY change: {prev_status} → {current_status}"
-                    )
-                    alerts.append(Alert(
-                        alert_type=AlertType.STORE_BUSY,
-                        store_name=store.name,
-                        previous_value=prev_status,
-                        current_value=current_status,
-                        doughcon_level=current_data.doughcon_level,
-                        details=detail_msg
-                    ))
 
             # Check activity spike (unchanged)
             prev_activity = prev_store.get("activity_percent")

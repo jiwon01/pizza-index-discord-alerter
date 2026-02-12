@@ -102,8 +102,8 @@ class TestChangeDetector:
 
         assert alerts == []
 
-    def test_store_open_to_busy_alert(self, mock_state_manager):
-        """OPEN to BUSY should generate a STORE_BUSY alert."""
+    def test_store_open_to_busy_no_alert(self, mock_state_manager):
+        """OPEN to BUSY should NOT generate an alert."""
         mock_state_manager.get_previous_doughcon.return_value = 4
         mock_state_manager.get_previous_stores.return_value = {
             "DOMINO'S": {"name": "DOMINO'S", "status": "OPEN", "activity_percent": None}
@@ -116,14 +116,10 @@ class TestChangeDetector:
         )
         alerts = detector.detect_changes(data)
 
-        assert len(alerts) == 1
-        assert alerts[0].alert_type == AlertType.STORE_BUSY
-        assert alerts[0].store_name == "DOMINO'S"
-        assert alerts[0].previous_value == "OPEN"
-        assert alerts[0].current_value == "BUSY"
+        assert alerts == []
 
-    def test_store_busy_to_open_alert(self, mock_state_manager):
-        """BUSY to OPEN should generate a STORE_BUSY alert (busy released)."""
+    def test_store_busy_to_open_no_alert(self, mock_state_manager):
+        """BUSY to OPEN should NOT generate an alert."""
         mock_state_manager.get_previous_doughcon.return_value = 4
         mock_state_manager.get_previous_stores.return_value = {
             "DOMINO'S": {"name": "DOMINO'S", "status": "BUSY", "activity_percent": None}
@@ -136,13 +132,10 @@ class TestChangeDetector:
         )
         alerts = detector.detect_changes(data)
 
-        assert len(alerts) == 1
-        assert alerts[0].alert_type == AlertType.STORE_BUSY
-        assert alerts[0].previous_value == "BUSY"
-        assert alerts[0].current_value == "OPEN"
+        assert alerts == []
 
-    def test_store_busy_to_closed_alert(self, mock_state_manager):
-        """BUSY to CLOSED should generate a STORE_BUSY alert (busy released)."""
+    def test_store_busy_to_closed_no_alert(self, mock_state_manager):
+        """BUSY to CLOSED should NOT generate an alert."""
         mock_state_manager.get_previous_doughcon.return_value = 4
         mock_state_manager.get_previous_stores.return_value = {
             "DOMINO'S": {"name": "DOMINO'S", "status": "BUSY", "activity_percent": None}
@@ -155,8 +148,7 @@ class TestChangeDetector:
         )
         alerts = detector.detect_changes(data)
 
-        assert len(alerts) == 1
-        assert alerts[0].alert_type == AlertType.STORE_BUSY
+        assert alerts == []
 
     def test_order_spike(self, mock_state_manager):
         """Detect order activity spike."""
@@ -241,17 +233,16 @@ class TestChangeDetector:
             doughcon_level=2,  # Escalation
             nehi_status="SOMETHING MIGHT HAPPEN",  # NEHI change
             stores=[
-                PizzaStore(name="DOMINO'S", status="BUSY"),  # BUSY change
+                PizzaStore(name="DOMINO'S", status="BUSY"),  # No alert expected
                 PizzaStore(name="PIZZA HUT", status="OPEN", activity_percent=60.0),  # Spike
             ]
         )
         alerts = detector.detect_changes(data)
 
-        assert len(alerts) == 4
+        assert len(alerts) == 3
         alert_types = {a.alert_type for a in alerts}
         assert AlertType.DOUGHCON_ESCALATION in alert_types
         assert AlertType.NEHI_CHANGE in alert_types
-        assert AlertType.STORE_BUSY in alert_types
         assert AlertType.ORDER_SPIKE in alert_types
 
 
